@@ -129,7 +129,7 @@ cd "AgentCon Cloud Repo"
 
 **Windows PowerShell:**
 ```powershell
-python -m venv .venv
+py -3.12 -m venv .venv
 ```
 
 **macOS/Linux:**

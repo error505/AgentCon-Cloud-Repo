@@ -35,11 +35,42 @@ class AgentFactory:
     
     def __init__(self, mcp_tool):
         self.mcp_tool = mcp_tool
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-        print(f"🤖 Using model: {model}")
-        self.chat_client = OpenAIChatClient(
-            api_key=os.getenv("OPENAI_API_KEY"), model_id=model
-        )
+        use_openai = os.getenv("USE_OPENAI", "false").lower() == "true"
+        use_ollama = os.getenv("USE_OLLAMA", "false").lower() == "true"
+        
+        if use_openai:
+            model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+            api_key = os.getenv("OPENAI_API_KEY")
+            print(f"🤖 Using OpenAI model: {model}")
+            self.chat_client = OpenAIChatClient(
+                api_key=api_key,
+                model_id=model
+            )
+            # OpenAI models support tools
+            self.supports_tools = True
+        elif use_ollama:
+            model = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+            print(f"🤖 Using Ollama model: {model} at {base_url}")
+            self.chat_client = OpenAIChatClient(
+                api_key="dummy",
+                model_id=model,
+                base_url=base_url
+            )
+            self.supports_tools = not model.startswith("gpt-oss")
+        else:
+            model = os.getenv("LOCAL_MODEL", "gpt-oss-20b-generic-cpu:1")
+            base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:56238/v1")
+            print(f"🤖 Using local Foundry model: {model} at {base_url}")
+            self.chat_client = OpenAIChatClient(
+                api_key="dummy",
+                model_id=model,
+                base_url=base_url
+            )
+            self.supports_tools = not model.startswith("gpt-oss")
+        
+        if not self.supports_tools:
+            print("⚠️  Note: This model doesn't support function calling/tools. MCP tools will be disabled.")
     
     def create_agent(self, role: AgentRole) -> ChatAgent:
         """Create agent with role-specific prompt and tools"""
@@ -50,7 +81,8 @@ class AgentFactory:
             AgentRole.VISUALIZER: "Generate a Mermaid diagram in flowchart syntax showing the Azure architecture. Use this format:\n```mermaid\ngraph TB\n    A[Service Name] --> B[Another Service]\n    B --> C[Database]\n```\nUse proper Azure service names. Include all components and connections.",
             AgentRole.IAC_GENERATOR: "Generate Bicep snippet. Use Microsoft Learn MCP to verify types/versions. Keep short."
         }
-        tools = [self.mcp_tool] if role != AgentRole.VISUALIZER else []
+        # Only add tools if model supports them (and not for visualizer)
+        tools = [self.mcp_tool] if (self.supports_tools and role != AgentRole.VISUALIZER) else []
         return ChatAgent(
             chat_client=self.chat_client, instructions=prompts[role],
             name=role.value, tools=tools
