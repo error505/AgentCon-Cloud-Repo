@@ -389,7 +389,9 @@ prompts = {
 - **Microsoft Agent Framework Docs**: [Official Documentation](https://learn.microsoft.com/agent-framework)
 - **MCP Specification**: [Model Context Protocol](https://modelcontextprotocol.io/)
 - **Azure Well-Architected Framework**: [Learn More](https://learn.microsoft.com/azure/well-architected/)
+- **Azure Cloud Visualizer Pro**: [Open-Source Agentic AI Azure Cloud Visualizer](https://github.com/error505/azure-cloud-ai-visualizer)
 - **Mermaid Diagram Syntax**: [Mermaid Documentation](https://mermaid.js.org/)
+
 
 ## 🤝 Contributing
 
