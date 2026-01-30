@@ -1,41 +1,26 @@
-"""
-AgentCon Zürich Demo: Agentic AI with Microsoft Learn MCP
-==========================================================
-Demonstrates: Agent Factory + Microsoft Learn MCP grounding for Azure architecture
-"""
-import asyncio
-import os
-import json
+"""AgentCon Zürich: Agentic AI with Microsoft Learn MCP"""
+import asyncio, os, json
 from enum import Enum
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from agent_framework import ChatAgent, ChatMessage, MCPStreamableHTTPTool, DataContent, UriContent
+from agent_framework import ChatAgent, MCPStreamableHTTPTool, DataContent, UriContent
 from agent_framework.openai import OpenAIChatClient
 
-# Load environment variables
 load_dotenv()
 
-
 def last_text(response):
-    """Safely extract assistant message text from AgentResponse"""
-    # New API: AgentResponse has a .text property
-    if hasattr(response, 'text') and response.text:
-        return response.text
-    # Fallback: empty string if no text
-    return ""
-
+    """Extract assistant message text from AgentResponse"""
+    return response.text if hasattr(response, 'text') and response.text else ""
 
 def save_response_to_file(step_name: str, content: str, output_dir: str = "output"):
     """Save agent response to a text file"""
     Path(output_dir).mkdir(exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{output_dir}/{step_name}_{timestamp}.txt"
+    filename = f"{output_dir}/{step_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"💾 Saved to: {filename}")
     return filename
-
 
 class AgentRole(Enum):
     """Agent roles in the architecture pipeline"""
@@ -45,132 +30,88 @@ class AgentRole(Enum):
     VISUALIZER = "visualizer"
     IAC_GENERATOR = "iac_generator"
 
-
 class AgentFactory:
     """Centralized factory for creating MCP-grounded agents"""
     
     def __init__(self, mcp_tool):
         self.mcp_tool = mcp_tool
-        # Initialize with API key and model from environment
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         print(f"🤖 Using model: {model}")
         self.chat_client = OpenAIChatClient(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model_id=model
+            api_key=os.getenv("OPENAI_API_KEY"), model_id=model
         )
     
     def create_agent(self, role: AgentRole) -> ChatAgent:
         """Create agent with role-specific prompt and tools"""
         prompts = {
-            AgentRole.DIAGRAM_INTERPRETER: """Convert diagram to text. List: services, connections, access (public/private). Azure assumed. Be concise.""",
-            
-            AgentRole.CRITIC: """Critique Azure architecture: security issues, wrong services, missing best practices. Use Microsoft Learn MCP. Keep brief with bullets.""",
-            
-            AgentRole.FIXER: """Fix architecture: apply Well-Architected, use managed services, secure networking. Use Microsoft Learn MCP. Output improved text.""",
-            
-            AgentRole.VISUALIZER: """Generate a Mermaid diagram in flowchart syntax showing the Azure architecture. Use this format:
-```mermaid
-graph TB
-    A[Service Name] --> B[Another Service]
-    B --> C[Database]
-```
-Use proper Azure service names. Include all components and connections.""",
-            
-            AgentRole.IAC_GENERATOR: """Generate Bicep snippet. Use Microsoft Learn MCP to verify types/versions. Keep short."""
+            AgentRole.DIAGRAM_INTERPRETER: "Convert diagram to text. List: services, connections, access (public/private). Azure assumed. Be concise.",
+            AgentRole.CRITIC: "Critique Azure architecture: security issues, wrong services, missing best practices. Use Microsoft Learn MCP. Keep brief with bullets.",
+            AgentRole.FIXER: "Fix architecture: apply Well-Architected, use managed services, secure networking. Use Microsoft Learn MCP. Output improved text.",
+            AgentRole.VISUALIZER: "Generate a Mermaid diagram in flowchart syntax showing the Azure architecture. Use this format:\n```mermaid\ngraph TB\n    A[Service Name] --> B[Another Service]\n    B --> C[Database]\n```\nUse proper Azure service names. Include all components and connections.",
+            AgentRole.IAC_GENERATOR: "Generate Bicep snippet. Use Microsoft Learn MCP to verify types/versions. Keep short."
         }
-        
         tools = [self.mcp_tool] if role != AgentRole.VISUALIZER else []
-        
         return ChatAgent(
-            chat_client=self.chat_client,
-            instructions=prompts[role],
-            name=role.value,
-            tools=tools
+            chat_client=self.chat_client, instructions=prompts[role],
+            name=role.value, tools=tools
         )
-
 
 async def run_sequential_workflow(factory: AgentFactory, input_data, is_image: bool = False):
     """Execute the pipeline sequentially (with optional image interpretation)"""
     
-    # Optional Step 0: Diagram Interpreter (for image inputs)
+    # Step 0: Diagram Interpreter (optional, for image inputs)
     if is_image:
-        print(f"\n{'='*60}")
-        print("🖼️  STEP 0: Diagram Interpreter (image → text)")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}\n🖼️  STEP 0: Diagram Interpreter (image → text)\n{'='*60}")
         interpreter = factory.create_agent(AgentRole.DIAGRAM_INTERPRETER)
-        interpreter_response = await interpreter.run(input_data)
-        architecture_text = last_text(interpreter_response)
+        architecture_text = last_text(await interpreter.run(input_data))
         print(architecture_text)
     else:
         architecture_text = input_data
-        print(f"\n{'='*60}")
-        print("🎯 INPUT ARCHITECTURE")
-        print(f"{'='*60}")
-        print(architecture_text)
+        print(f"\n{'='*60}\n🎯 INPUT ARCHITECTURE\n{'='*60}\n{architecture_text}")
     
-    # Step 1: Critic (with MCP) - STREAMING
-    print(f"\n{'='*60}")
-    print("🔍 STEP 1: Architecture Critic (MCP-grounded)")
-    print(f"{'='*60}")
+    # Step 1: Critic (MCP-grounded, streaming)
+    print(f"\n{'='*60}\n🔍 STEP 1: Architecture Critic (MCP-grounded)\n{'='*60}")
     critic = factory.create_agent(AgentRole.CRITIC)
-    
-    # Use streaming to show live reasoning
     critique_parts = []
     async for chunk in critic.run_stream(architecture_text):
         if chunk.text:
             print(chunk.text, end="", flush=True)
             critique_parts.append(chunk.text)
-    
     critique = ''.join(critique_parts)
-    print()  # New line after streaming
+    print()
     save_response_to_file("step1_critic", critique)
     
-    # Step 2: Fixer (with MCP) - STREAMING
-    print(f"\n{'='*60}")
-    print("🔧 STEP 2: Architecture Fixer (MCP-grounded)")
-    print(f"{'='*60}")
+    # Step 2: Fixer (MCP-grounded, streaming)
+    print(f"\n{'='*60}\n🔧 STEP 2: Architecture Fixer (MCP-grounded)\n{'='*60}")
     fixer = factory.create_agent(AgentRole.FIXER)
-    
     fixer_parts = []
     async for chunk in fixer.run_stream(f"Original:\n{architecture_text}\n\nCritique:\n{critique}"):
         if chunk.text:
             print(chunk.text, end="", flush=True)
             fixer_parts.append(chunk.text)
-    
     improved = ''.join(fixer_parts)
-    print()  # New line after streaming
+    print()
     save_response_to_file("step2_fixer", improved)
     
     # Step 3: Visualizer (Mermaid diagram)
-    print(f"\n{'='*60}")
-    print("📊 STEP 3: Diagram Visualizer (Mermaid)")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}\n📊 STEP 3: Diagram Visualizer (Mermaid)\n{'='*60}")
     visualizer = factory.create_agent(AgentRole.VISUALIZER)
-    diagram_response = await visualizer.run(improved)
-    diagram = last_text(diagram_response)
+    diagram = last_text(await visualizer.run(improved))
     print(diagram)
     save_response_to_file("step3_mermaid_diagram", diagram)
     
-    # Step 4: IaC Generator (with MCP) - STREAMING
-    print(f"\n{'='*60}")
-    print("📝 STEP 4: IaC Generator (MCP-grounded)")
-    print(f"{'='*60}")
+    # Step 4: IaC Generator (MCP-grounded, streaming)
+    print(f"\n{'='*60}\n📝 STEP 4: IaC Generator (MCP-grounded)\n{'='*60}")
     iac_generator = factory.create_agent(AgentRole.IAC_GENERATOR)
-    
     bicep_parts = []
     async for chunk in iac_generator.run_stream(improved):
         if chunk.text:
             print(chunk.text, end="", flush=True)
             bicep_parts.append(chunk.text)
-    
     bicep = ''.join(bicep_parts)
-    print()  # New line after streaming
+    print()
     save_response_to_file("step4_bicep", bicep)
-    
-    print(f"\n{'='*60}")
-    print("✅ PIPELINE COMPLETE")
-    print(f"{'='*60}")
-
+    print(f"\n{'='*60}\n✅ PIPELINE COMPLETE\n{'='*60}")
 
 async def main():
     """Main demo entry point"""
